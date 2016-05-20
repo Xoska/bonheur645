@@ -152,6 +152,8 @@ struct Cell* computeProblemTwoDispatch(struct MPIParams mpiParams, struct Cell* 
     MPI_Isend(&cells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
     MPI_Wait(&send_request, &status);
 
+    MPI_Recv(&cells[0], subsetSize, mpiCellType, senderRank, senderRank, MPI_COMM_WORLD, &status);
+
     return cells;
 }
 
@@ -268,12 +270,17 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
         if (mpiParams.worldRank < subsetSize * 2) {
 
             MPI_Status status;
+            MPI_Request send_request;
             int senderRank = mpiParams.worldRank - subsetSize;
             struct Cell* subsetCells = (struct Cell*)malloc(sizeof(struct Cell) * subsetSize);
 
             MPI_Recv(&subsetCells[0], subsetSize, mpiCellType, senderRank, senderRank, MPI_COMM_WORLD, &status);
 
             struct Cell* subProcessedCells = computeProblemTwo(subsetCells, subsetSize, 2, properties.iterations);
+
+            MPI_Isend(&subsetCells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
+
+
         }
 
         MPI_Finalize();
