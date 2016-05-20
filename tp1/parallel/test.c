@@ -113,29 +113,11 @@ struct Cell* computeProblemOne(struct Cell* cells, int subsetSize, struct Transf
     return cells;
 }
 
-struct Cell* computeProblemTwo(struct MPIParams mpiParams, struct Cell* cells,
-                               int subsetSize, struct TransformationProperties properties) {
+struct Cell* computeProblemTwo(struct Cell* cells, int subsetSize, int initIteration, int maxIterations) {
 
     int k, j;
-    int tag = mpiParams.topologyRank + subsetSize;
 
-    MPI_Status status;
-    MPI_Request	send_request, recv_request;
-
-    cells[0].value = cells[0].value + (cells[0].posX * 1);
-
-    printf(" aaaaaaaaaaaaaaaaaaaa Salut mon id est : %d\n", mpiParams.topologyRank);
-
-    k = 9;
-
-    MPI_Issend(&k, 1, MPI_INT, tag, tag, MPI_COMM_WORLD, &send_request);
-    MPI_Irecv(&cells, subsetSize, mpiCellType, tag, tag, MPI_COMM_WORLD, &recv_request);
-    MPI_Wait(&send_request, &status);
-    MPI_Wait(&recv_request, &status);
-
-
-/*
-    for (k = 1; k <= properties.iterations; ++k) {
+    for (k = initIteration; k <= maxIterations; ++k) {
 
         struct Cell* previousIterationCells = malloc(subsetSize * sizeof(struct Cell));
         memcpy(previousIterationCells, cells, subsetSize * sizeof(struct Cell));
@@ -143,8 +125,6 @@ struct Cell* computeProblemTwo(struct MPIParams mpiParams, struct Cell* cells,
         for (j = 0; j < subsetSize; ++j) {
 
             if (j > 0) {
-
-                MPI_Send(&k, 1, MPI_INT, tag, tag, MPI_COMM_WORLD);
 
                 cells[j].value = previousIterationCells[j].value + cells[j - 1].value * k;
             }
@@ -155,7 +135,22 @@ struct Cell* computeProblemTwo(struct MPIParams mpiParams, struct Cell* cells,
         }
 
         free(previousIterationCells);
-    }*/
+    }
+
+    return cells;
+}
+
+struct Cell* computeProblemTwoDispatch(struct MPIParams mpiParams, struct Cell* cells, int subsetSize) {
+
+    int senderRank = mpiParams.worldRank + subsetSize;
+
+    MPI_Status status;
+    MPI_Request	send_request;
+
+    cells = computeProblemTwo(cells, subsetSize, 1, 1);
+
+    MPI_Isend(&cells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
+    MPI_Wait(&send_request, &status);
 
     return cells;
 }
@@ -169,7 +164,7 @@ struct Cell* computeProblem(struct MPIParams mpiParams, struct Cell* cells,
     }
     else if (properties.problemToSolve == 2) {
 
-        return computeProblemTwo(mpiParams, cells, subsetSize, properties);
+        return computeProblemTwoDispatch(mpiParams, cells, subsetSize);
     }
 }
 
@@ -250,8 +245,6 @@ void endProcess(struct MPIParams mpiParams, struct Cell* processedCells, struct 
 
 void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, int subsetSize, bool canScatter) {
 
-   // printf("Salut mon topology size c'est: %d et mon subsetSize est : %d\n", mpiParams.topologyRank, subsetSize);
-
     if (canScatter) {
 
         struct Cell* subsetCells = (struct Cell*)malloc(sizeof(struct Cell) * subsetSize);
@@ -259,7 +252,6 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
         MPI_Scatter(mpiParams.initData, subsetSize, mpiCellType, subsetCells, subsetSize, mpiCellType, 0, mpiParams.topology);
 
         struct Cell* subProcessedCells = computeProblem(mpiParams, subsetCells, subsetSize, properties);
-        // printCells(subProcessedCells, subsetSize);
         struct Cell* processedCells = NULL;
 
         if (isRootProcess(mpiParams.worldRank)) {
@@ -273,27 +265,17 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
     }
     else {
 
-        if (mpiParams.worldRank == 8) {
+        if (mpiParams.worldRank < subsetSize * 2) {
 
-            printf("Salut mon id est : %d\n", mpiParams.worldRank);
-
-            int idSent = mpiParams.worldRank - subsetSize;
-            int tag1 = mpiParams.worldRank;
-            int k;
-
-            MPI_Request	send_request, recv_request;
             MPI_Status status;
-            MPI_Irecv(&k, 1, MPI_INT, idSent, tag1, MPI_COMM_WORLD, &recv_request);
-
-            printf("Salut j'ai recu k: %d\n", k);
-
+            int senderRank = mpiParams.worldRank - subsetSize;
             struct Cell* subsetCells = (struct Cell*)malloc(sizeof(struct Cell) * subsetSize);
-            MPI_Issend(&subsetCells, subsetSize, mpiCellType, idSent, tag1, MPI_COMM_WORLD, &send_request);
 
-            MPI_Wait(&send_request, &status);
-            MPI_Wait(&recv_request, &status);
+            MPI_Recv(&subsetCells[0], subsetSize, mpiCellType, senderRank, senderRank, MPI_COMM_WORLD, &status);
+
+            struct Cell* subProcessedCells = computeProblemTwo(subsetCells, subsetSize, 2, properties.iterations);
         }
-        // processing
+
         MPI_Finalize();
     }
 }
