@@ -95,66 +95,87 @@ struct Cell* createCells(struct TransformationProperties properties) {
     return cells;
 }
 
-struct Cell* computeProblemOne(struct Cell* cells, int subsetSize, struct TransformationProperties properties) {
+struct Cell* computeProblemOne(struct Cell* cells, int subsetSize, int maxIterations) {
 
     int i, k;
 
     for (i = 0; i < subsetSize; ++i) {
 
-        int valueAtIterationZero = cells[i].value;
+        for (k = 1; k <= maxIterations; ++k) {
 
-        for (k = 1; k <= properties.iterations; ++k) {
-
-            cells[i].value = valueAtIterationZero + (cells[i].posX + cells[i].posY) * k;
-            valueAtIterationZero = cells[i].value;
+            cells[i].value = cells[i].value + (cells[i].posX + cells[i].posY) * k;
         }
     }
 
     return cells;
 }
 
-struct Cell* computeProblemTwo(struct Cell* cells, int subsetSize, int initIteration, int maxIterations) {
+struct Cell* computeProblemTwo(struct Cell* cells, int subsetSize, int iteration) {
 
-    int k, j;
+    int j;
 
-    for (k = initIteration; k <= maxIterations; ++k) {
+    for (j = 0; j < subsetSize; ++j) {
 
-        struct Cell* previousIterationCells = malloc(subsetSize * sizeof(struct Cell));
-        memcpy(previousIterationCells, cells, subsetSize * sizeof(struct Cell));
+        if (j > 0) {
 
-        for (j = 0; j < subsetSize; ++j) {
-
-            if (j > 0) {
-
-                cells[j].value = previousIterationCells[j].value + cells[j - 1].value * k;
-            }
-            else {
-
-                cells[j].value = previousIterationCells[j].value + (cells[j].posX * k);
-            }
+            cells[j].value = cells[j].value + cells[j - 1].value * iteration;
         }
+        else {
 
-        free(previousIterationCells);
+            cells[j].value = cells[j].value + (cells[j].posX * iteration);
+        }
     }
 
     return cells;
 }
 
-struct Cell* computeProblemTwoDispatch(struct MPIParams mpiParams, struct Cell* cells, int subsetSize) {
-
-    int senderRank = mpiParams.worldRank + subsetSize;
+struct Cell* computeProblemTwoBalancerOne(struct MPIParams mpiParams, struct Cell* cells,
+                                          int subsetSize, int maxIteration) {
 
     MPI_Status status;
     MPI_Request	send_request;
+    int senderRank = mpiParams.worldRank + subsetSize;
+    int iteration = 1;
 
-    cells = computeProblemTwo(cells, subsetSize, 1, 1);
+    while (iteration <= maxIteration) {
 
-    MPI_Isend(&cells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
-    MPI_Wait(&send_request, &status);
+        MPI_Isend(&cells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
+        MPI_Wait(&send_request, &status);
 
-    MPI_Recv(&cells[0], subsetSize, mpiCellType, senderRank, senderRank, MPI_COMM_WORLD, &status);
+        MPI_Recv(&cells[0], subsetSize, mpiCellType, senderRank, senderRank, MPI_COMM_WORLD, &status);
+
+        if (++iteration <= maxIteration) {
+
+            cells = computeProblemTwo(cells, subsetSize, iteration);
+            iteration++;
+        }
+    }
 
     return cells;
+}
+
+void computeProblemTwoBalancerTwo(struct MPIParams mpiParams, int subsetSize, int maxIterations) {
+
+    if (maxIterations > 0) {
+
+        int iteration = 0;
+        MPI_Status status;
+        MPI_Request send_request;
+        int senderRank = mpiParams.worldRank - subsetSize;
+        struct Cell* subsetCells = (struct Cell*)malloc(sizeof(struct Cell) * subsetSize);
+
+        do {
+
+            MPI_Recv(&subsetCells[0], subsetSize, mpiCellType, senderRank, senderRank, MPI_COMM_WORLD, &status);
+
+            iteration++;
+            struct Cell* subProcessedCells = computeProblemTwo(subsetCells, subsetSize, iteration);
+
+            MPI_Isend(&subsetCells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
+            MPI_Wait(&send_request, &status);
+        }
+        while (++iteration < maxIterations);
+    }
 }
 
 struct Cell* computeProblem(struct MPIParams mpiParams, struct Cell* cells,
@@ -162,11 +183,11 @@ struct Cell* computeProblem(struct MPIParams mpiParams, struct Cell* cells,
 
     if (properties.problemToSolve == 1) {
 
-        return computeProblemOne(cells, subsetSize, properties);
+        return computeProblemOne(cells, subsetSize, properties.iterations);
     }
     else if (properties.problemToSolve == 2) {
 
-        return computeProblemTwoDispatch(mpiParams, cells, subsetSize);
+        return computeProblemTwoBalancerOne(mpiParams, cells, subsetSize, properties.iterations);
     }
 }
 
@@ -269,18 +290,7 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
 
         if (mpiParams.worldRank < subsetSize * 2) {
 
-            MPI_Status status;
-            MPI_Request send_request;
-            int senderRank = mpiParams.worldRank - subsetSize;
-            struct Cell* subsetCells = (struct Cell*)malloc(sizeof(struct Cell) * subsetSize);
-
-            MPI_Recv(&subsetCells[0], subsetSize, mpiCellType, senderRank, senderRank, MPI_COMM_WORLD, &status);
-
-            struct Cell* subProcessedCells = computeProblemTwo(subsetCells, subsetSize, 2, properties.iterations);
-
-            MPI_Isend(&subsetCells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
-
-
+            computeProblemTwoBalancerTwo(mpiParams, subsetSize, properties.iterations);
         }
 
         MPI_Finalize();
@@ -316,7 +326,7 @@ void processParallelProblemTwo(struct MPIParams mpiParams, struct Transformation
     MPI_Comm_size(topology, &topology_size);
     mpiParams.topologySize = topology_size;
 
-    bool canScatter = mpiParams.topologySize <= subsetSize;
+    bool canScatter = mpiParams.worldRank < processorsNeeded;
 
     processProblemCore(mpiParams, properties, subsetSize, canScatter);
 }
