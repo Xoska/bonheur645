@@ -115,7 +115,7 @@ void printArray(long** array, struct TransformationProperties properties) {
 
         for (j = 0; j < properties.sizeY; j++) {
 
-            printf("%ld|", array[i][j]);
+            printf("%-10ld|", array[i][j]);
         }
 
         printf("\n");
@@ -166,4 +166,6 @@ int main(int argc, char *argv[]) {
 
         printf("Missing arguments.\n");
     }
+
+    return 0;
 }

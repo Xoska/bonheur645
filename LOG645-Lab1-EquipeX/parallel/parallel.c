@@ -60,14 +60,26 @@ struct Cell buildCell(int posX, int posY, int value) {
     return cell;
 }
 
-void printCells(struct Cell* cells, int size) {
+void printCells(struct Cell* cells, struct TransformationProperties properties, clock_t timeDiff) {
 
-    int i;
+    printf("Problems solve type : Parallel. \n");
 
-    for (i = 0; i < size; ++i) {
+    long time = timeDiff * 1000 / CLOCKS_PER_SEC;
+    printf("Time taken : %ld seconds %ld milliseconds.\n", time / 1000, time % 1000);
 
-        printf("Cell[%d][%d] = %d\n", cells[i].posX, cells[i].posY, cells[i].value);
+    int i, dataSize = properties.sizeX * properties.sizeY;
+
+    for (i = 0; i < dataSize; ++i) {
+
+        if (i > 0 && i % properties.sizeX == 0) {
+
+            printf("\n");
+        }
+
+        printf("%-10d|", cells[i].value);
     }
+
+    printf("\n\n");
 }
 
 struct Cell* createCells(struct TransformationProperties properties) {
@@ -122,7 +134,7 @@ struct Cell* computeProblemTwo(struct Cell* cells, int subsetSize, int iteration
         }
         else {
 
-            cells[j].value = cells[j].value + (cells[j].posX * iteration);
+            cells[j].value = cells[j].value + (cells[j].posY * iteration);
         }
     }
 
@@ -171,7 +183,7 @@ void computeProblemTwoBalancerTwo(struct MPIParams mpiParams, int subsetSize, in
             iteration++;
             struct Cell* subProcessedCells = computeProblemTwo(subsetCells, subsetSize, iteration);
 
-            MPI_Isend(&subsetCells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
+            MPI_Isend(&subProcessedCells[0], subsetSize, mpiCellType, senderRank, mpiParams.worldRank, MPI_COMM_WORLD, &send_request);
             MPI_Wait(&send_request, &status);
         }
         while (++iteration < maxIterations);
@@ -185,7 +197,7 @@ struct Cell* computeProblem(struct MPIParams mpiParams, struct Cell* cells,
 
         return computeProblemOne(cells, subsetSize, properties.iterations);
     }
-    else if (properties.problemToSolve == 2) {
+    else {
 
         return computeProblemTwoBalancerOne(mpiParams, cells, subsetSize, properties.iterations);
     }
@@ -250,23 +262,17 @@ void freeMemory(struct MPIParams mpiParams, struct Cell* processedCells, struct 
     free(subProcessedCells);
 }
 
-void report(struct MPIParams mpiParams, struct Cell* processedCells) {
+void report(struct MPIParams mpiParams, struct TransformationProperties properties,
+            struct Cell* processedCells, clock_t time) {
 
     if (isRootProcess(mpiParams.worldRank)) {
 
-        printCells(processedCells, mpiParams.dataSize);
+        printCells(processedCells, properties, clock() - time);
     }
 }
 
-void endProcess(struct MPIParams mpiParams, struct Cell* processedCells, struct Cell* subProcessedCells) {
-    report(mpiParams, processedCells);
-    freeMemory(mpiParams, processedCells, subProcessedCells);
-
-    MPI_Barrier(mpiParams.topology);
-    MPI_Finalize();
-}
-
-void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, int subsetSize, bool canScatter) {
+void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties,
+                        int subsetSize, bool canScatter, clock_t time) {
 
     if (canScatter) {
 
@@ -284,7 +290,11 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
 
         MPI_Gather(&subProcessedCells[0], subsetSize, mpiCellType, processedCells, subsetSize, mpiCellType, 0, mpiParams.topology);
 
-        endProcess(mpiParams, processedCells, subProcessedCells);
+        report(mpiParams, properties, processedCells, time);
+        freeMemory(mpiParams, processedCells, subProcessedCells);
+
+        MPI_Barrier(mpiParams.topology);
+        MPI_Finalize();
     }
     else {
 
@@ -297,7 +307,7 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
     }
 }
 
-void processParallelProblemOne(struct MPIParams mpiParams, struct TransformationProperties properties) {
+void processParallelProblemOne(struct MPIParams mpiParams, struct TransformationProperties properties, clock_t time) {
 
     int subsetSize = mpiParams.dataSize / mpiParams.worldSize;
 
@@ -305,10 +315,10 @@ void processParallelProblemOne(struct MPIParams mpiParams, struct Transformation
     mpiParams.topologyRank = mpiParams.worldRank;
     mpiParams.topologySize = mpiParams.worldSize;
 
-    processProblemCore(mpiParams, properties, subsetSize, true);
+    processProblemCore(mpiParams, properties, subsetSize, true, time);
 }
 
-void processParallelProblemTwo(struct MPIParams mpiParams, struct TransformationProperties properties) {
+void processParallelProblemTwo(struct MPIParams mpiParams, struct TransformationProperties properties, clock_t time) {
 
     int subsetSize = properties.sizeY;
 
@@ -328,23 +338,30 @@ void processParallelProblemTwo(struct MPIParams mpiParams, struct Transformation
 
     bool canScatter = mpiParams.worldRank < processorsNeeded;
 
-    processProblemCore(mpiParams, properties, subsetSize, canScatter);
+    processProblemCore(mpiParams, properties, subsetSize, canScatter, time);
 }
 
 int main(int argc, char *argv[]) {
 
     if (argc == 4) {
 
+        clock_t startSolvingProblems;
         struct TransformationProperties properties = buildProperties(argv);
         struct MPIParams mpiParams = initMPI(argc, argv, properties);
 
+        if (mpiParams.worldRank == 0) {
+
+            printf("\nStarting parallel process...\n");
+            startSolvingProblems = clock();
+        }
+
         if (properties.problemToSolve == 1) {
 
-            processParallelProblemOne(mpiParams, properties);
+            processParallelProblemOne(mpiParams, properties, startSolvingProblems);
         }
         else if (properties.problemToSolve == 2 && mpiParams.worldSize >= (properties.sizeY * 2)) {
 
-            processParallelProblemTwo(mpiParams, properties);
+            processParallelProblemTwo(mpiParams, properties, startSolvingProblems);
         }
         else {
 
@@ -355,4 +372,6 @@ int main(int argc, char *argv[]) {
 
         printf("Missing arguments.\n");
     }
+
+    return 0;
 }
