@@ -114,7 +114,7 @@ struct Cell* computeProblemOne(struct Cell* cells, int subsetSize, int maxIterat
     for (i = 0; i < subsetSize; ++i) {
 
         for (k = 1; k <= maxIterations; ++k) {
-
+            usleep(1000);
             cells[i].value = cells[i].value + (cells[i].posX + cells[i].posY) * k;
         }
     }
@@ -129,11 +129,11 @@ struct Cell* computeProblemTwo(struct Cell* cells, int subsetSize, int iteration
     for (j = 0; j < subsetSize; ++j) {
 
         if (j > 0) {
-
+            usleep(1000);
             cells[j].value = cells[j].value + cells[j - 1].value * iteration;
         }
         else {
-
+            usleep(100);
             cells[j].value = cells[j].value + (cells[j].posY * iteration);
         }
     }
