@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <omp.h>
 
@@ -58,8 +58,6 @@ struct Cell* createCells(struct TransformationProperties properties) {
 
 void printCells(struct Cell* cells, struct TransformationProperties properties, struct timeval startTime) {
 
-    printf("Problems solve type : Parallel openMP. \n");
-
     double elapsedTime;
     struct timeval endTime;
 
@@ -109,7 +107,7 @@ struct Cell* processProblemOne(struct Cell* cells, struct TransformationProperti
 
     for (k = 1; k <= properties.iterations; ++k) {
 
-        #pragma omp parallel for shared(cells) schedule(static, 2)
+        #pragma omp parallel for shared(cells) schedule(static, 1)
         for (i = 0; i < dataSize; i++) {
 
             usleep(500);
@@ -127,13 +125,14 @@ struct Cell* processProblemTwo(struct Cell* cells, struct TransformationProperti
 
     for (k = 1; k <= properties.iterations; ++k) {
 
-        for (i = 0; i < dataSize; i++) {
+        #pragma omp parallel for shared(cells) schedule(static, properties.sizeX)
+        for (i = dataSize - 1; i >= 0; i--) {
 
             usleep(500);
 
-            if (cells[i].posY >= properties.sizeY - 1) {
+            if (cells[i].posX >= properties.sizeX - 1) {
 
-                cells[i].value += cells[i].posX;
+                cells[i].value += cells[i].posY;
             }
             else {
 
@@ -170,7 +169,7 @@ int main(int argc, char *argv[]) {
 
     if ( argc == 4 ) {
 
-        printf("\n\nStarting process...\n");
+        printf("\nProblems solve type : Parallel openMP.\nStarting process...\n\n");
 
         struct timeval startTime;
         gettimeofday(&startTime, NULL);
@@ -178,21 +177,6 @@ int main(int argc, char *argv[]) {
         struct TransformationProperties properties = buildProperties(argv);
         struct Cell* cells = createCells(properties);
         initOMP();
-/*
-        int rang, nprocs;
-        int toto = 0;
-        #pragma omp parallel
-        {
-            rang = omp_get_thread_num();
-            nprocs = omp_get_num_threads();
-            printf("Bonjour, je suis %d (parmi %d threads)\n", rang, nprocs);
-            toto++;
-        }
-
-        printf("Bonjour, je suis toto : %d\n", toto);*/
-
-
-        //  #pragma omp parallel for collapse(3)
 
         if (properties.problemToSolve == 1 || properties.problemToSolve == 2) {
 

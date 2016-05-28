@@ -1,18 +1,18 @@
-PROG = sequential
-CFLAGS = -g -fPIC -m64 -Wall
-LFLAGS= -fPIC -m64 -Wall
+PROG = parallel
+CFLAGS = -g -fPIC -m64 -Wall -fopenmp
+LFLAGS= -fPIC -m64 -Wall -fopenmp
 CC = gcc
 
 all: $(PROG)
 
-sequential.o: sequential.c
-	$(CC) $(CFLAGS) -c sequential.c
+parallel.o: parallel.c
+	$(CC) $(CFLAGS) -c parallel.c
 
-sequential : sequential.o
-	$(CC) $(LFLAGS) sequential.o -o sequential
+parallel : parallel.o
+	$(CC) $(LFLAGS) parallel.o -o parallel
 
 run:
-	./sequential ${ARGS}
+	./parallel ${ARGS}
 
 ps:
 	ps -fu $$USER
