@@ -9,6 +9,7 @@
 struct TransformationProperties {
     int sizeX;
     int sizeY;
+    int dataSize;
     int iterations;
     int startValue;
     int problemToSolve;
@@ -56,21 +57,13 @@ struct Cell* createCells(struct TransformationProperties properties) {
     return cells;
 }
 
-void printCells(struct Cell* cells, struct TransformationProperties properties, struct timeval startTime) {
+void printCells(struct Cell* cells, struct TransformationProperties properties, double elapsedTime) {
 
-    double elapsedTime;
-    struct timeval endTime;
+    printf("Time taken : %f ms.\n", elapsedTime);
+    printf("Results : \n");
 
-    gettimeofday(&endTime, NULL);
-
-    elapsedTime = (endTime.tv_sec - startTime.tv_sec) * 1000.0;
-    elapsedTime += (endTime.tv_usec - startTime.tv_usec) / 1000.0;
-
-    printf("Time taken : %f milliseconds.\n", elapsedTime);
-
-    int i, dataSize = properties.sizeX * properties.sizeY;
-
-    for (i = 0; i < dataSize; ++i) {
+    int i;
+    for (i = 0; i < properties.dataSize; ++i) {
 
         if (i > 0 && i % properties.sizeX == 0) {
 
@@ -94,6 +87,7 @@ struct TransformationProperties buildProperties(char *argv[]) {
 
     properties.sizeX = SIZE;
     properties.sizeY = SIZE;
+    properties.dataSize = properties.sizeX * properties.sizeY;
     properties.problemToSolve = atoi(argv[1]);
     properties.startValue = atoi(argv[2]);
     properties.iterations = atoi(argv[3]);
@@ -101,63 +95,173 @@ struct TransformationProperties buildProperties(char *argv[]) {
     return properties;
 }
 
-struct Cell* processProblemOne(struct Cell* cells, struct TransformationProperties properties) {
+int processProblemOneCore(struct Cell cell) {
 
-    int i, k, dataSize = properties.sizeX * properties.sizeY;
+    usleep(500);
 
+    return cell.posX + cell.posY;
+}
+
+struct Cell* processProblemOneSequential(struct Cell* cells, struct TransformationProperties properties) {
+
+    int i, k;
+    for (k = 1; k <= properties.iterations; ++k) {
+
+        for (i = 0; i < properties.dataSize; i++) {
+
+            cells[i].value += processProblemOneCore(cells[i]);
+        }
+    }
+
+    return cells;
+}
+
+struct Cell* processProblemOneParallel(struct Cell* cells, struct TransformationProperties properties) {
+
+    int i, k;
     for (k = 1; k <= properties.iterations; ++k) {
 
         #pragma omp parallel for shared(cells) schedule(static, 1)
-        for (i = 0; i < dataSize; i++) {
+        for (i = 0; i < properties.dataSize; i++) {
 
-            usleep(500);
-
-            cells[i].value += (cells[i].posX + cells[i].posY);
+            cells[i].value += processProblemOneCore(cells[i]);
         }
     }
 
     return cells;
 }
 
-struct Cell* processProblemTwo(struct Cell* cells, struct TransformationProperties properties) {
+int processProblemTwoCore(struct Cell* cells, int i, int sizeX) {
 
-    int i, k, dataSize = properties.sizeX * properties.sizeY;
+    usleep(500);
 
+    if (cells[i].posX >= sizeX - 1) {
+
+        return cells[i].posY;
+    }
+    else {
+
+        return cells[i + 1].value;
+    }
+}
+
+struct Cell* processProblemTwoSequential(struct Cell* cells, struct TransformationProperties properties) {
+
+    int i, k;
+    for (k = 1; k <= properties.iterations; ++k) {
+
+        for (i = properties.dataSize - 1; i >= 0; i--) {
+
+            cells[i].value += processProblemTwoCore(cells, i, properties.sizeX);
+        }
+    }
+
+    return cells;
+}
+
+struct Cell* processProblemTwoParallel(struct Cell* cells, struct TransformationProperties properties) {
+
+    int i, k;
     for (k = 1; k <= properties.iterations; ++k) {
 
         #pragma omp parallel for shared(cells) schedule(static, properties.sizeX)
-        for (i = dataSize - 1; i >= 0; i--) {
+        for (i = properties.dataSize - 1; i >= 0; i--) {
 
-            usleep(500);
-
-            if (cells[i].posX >= properties.sizeX - 1) {
-
-                cells[i].value += cells[i].posY;
-            }
-            else {
-
-                cells[i].value += cells[i + 1].value;
-            }
+            cells[i].value += processProblemTwoCore(cells, i, properties.sizeX);
         }
     }
 
     return cells;
 }
 
-void processProblemCore(struct Cell* cells, struct TransformationProperties properties, struct timeval startTime) {
+void printProblemInitialization(int problemToSolve, char* solvingType) {
+
+    printf("\nProblem %d solving type : %s.\nStarting process...\n\n", problemToSolve, solvingType);
+}
+
+struct Cell* processProblemSequential(struct Cell* cells, struct TransformationProperties properties) {
+
+    printProblemInitialization(properties.problemToSolve, "Sequential");
 
     if (properties.problemToSolve == 1) {
 
-        cells = processProblemOne(cells, properties);
+        return processProblemOneSequential(cells, properties);
     }
     else if (properties.problemToSolve == 2) {
 
-        cells = processProblemTwo(cells, properties);
+        return processProblemTwoSequential(cells, properties);
     }
 
-    printCells(cells, properties, startTime);
+    return cells;
+}
 
+struct Cell* processProblemParallel(struct Cell* cells, struct TransformationProperties properties) {
+
+    printProblemInitialization(properties.problemToSolve, "Parallel OpenMP");
+
+    if (properties.problemToSolve == 1) {
+
+        return processProblemOneParallel(cells, properties);
+    }
+    else if (properties.problemToSolve == 2) {
+
+        return processProblemTwoParallel(cells, properties);
+    }
+
+    return cells;
+}
+
+double getTimeDifferenceMS(struct timeval startTime, struct timeval endTime) {
+
+    double elapsedTime = (endTime.tv_sec - startTime.tv_sec) * 1000.0;
+    elapsedTime += (endTime.tv_usec - startTime.tv_usec) / 1000.0;
+
+    return elapsedTime;
+}
+
+double processProblemCore(struct TransformationProperties properties, int processType) {
+
+    struct Cell* cells = createCells(properties);
+
+    struct timeval startTime, endTime;
+    gettimeofday(&startTime, NULL);
+
+    if (processType == 1) {
+
+        cells = processProblemSequential(cells, properties);
+    }
+    else if (processType == 2) {
+
+        cells = processProblemParallel(cells, properties);
+    }
+
+    gettimeofday(&endTime, NULL);
+    double elapsedTime = getTimeDifferenceMS(startTime, endTime) ;
+
+    printCells(cells, properties, elapsedTime);
     freeMemory(cells);
+
+    return elapsedTime;
+}
+
+void printInitialization(struct TransformationProperties properties) {
+
+    printf("\nProperties : \n");
+    printf("    Problem to solve : %d\n", properties.problemToSolve);
+    printf("    Starting value : %d\n", properties.startValue);
+    printf("    Iterations : %d\n", properties.iterations);
+    printf("    Matrix %d x %d\n\n", properties.sizeX, properties.sizeY);
+    printf("----------------------------------------------------\n");
+}
+
+void compareProcesses(double timeSequential, double timeParallel) {
+
+    double acceleration = timeSequential / timeParallel;
+
+    printf("----------------------------------------------------\n\n");
+    printf("Acceleration = Time sequential / Time parallel\n");
+    printf("             = %f ms / %f ms\n", timeSequential, timeParallel);
+    printf("             = %f\n", acceleration);
 }
 
 void initOMP() {
@@ -169,27 +273,28 @@ int main(int argc, char *argv[]) {
 
     if ( argc == 4 ) {
 
-        printf("\nProblems solve type : Parallel openMP.\nStarting process...\n\n");
-
-        struct timeval startTime;
-        gettimeofday(&startTime, NULL);
-
         struct TransformationProperties properties = buildProperties(argv);
-        struct Cell* cells = createCells(properties);
         initOMP();
 
         if (properties.problemToSolve == 1 || properties.problemToSolve == 2) {
 
-            processProblemCore(cells, properties, startTime);
+            printInitialization(properties);
+
+            double timeSequential = processProblemCore(properties, 1);
+            double timeParallel = processProblemCore(properties, 2);
+
+            compareProcesses(timeSequential, timeParallel);
+
+            printf("\n");
         }
         else {
 
-            printf("Invalid arguments.\n");
+            printf("Invalid arguments. Problem to solve must be 1 or 2.\n");
         }
     }
     else {
 
-        printf("Missing arguments.\n");
+        printf("Missing arguments : [Problem to solve] [Starting value] [Iterations].\n");
     }
 
     return 0;
