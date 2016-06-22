@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
-#include <math.h>
+#include <sys/time.h>
 
 #define CELL_STRUCTURE_SIZE 7
 
@@ -63,6 +63,11 @@ double getTimeDifferenceMS(struct timeval startTime, struct timeval endTime) {
     elapsedTime += (endTime.tv_usec - startTime.tv_usec) / 1000.0;
 
     return elapsedTime;
+}
+
+int powSquare(int value) {
+
+    return value * value;
 }
 
 struct Cell addAdjacentValuesToCell(struct Cell cell, int valueMinusPosXOne, int valuePlusPosXOne,
@@ -167,9 +172,9 @@ struct Cell* computeProblem(struct Cell* cells, int subsetSize, int iteration, s
 
     for (i = 0; i < subsetSize; ++i) {
 
-        cells[i].value = (1 - 4 * properties.discretizedTime / pow(properties.subDivisionSize, 2))
+        cells[i].value = (1 - 4 * properties.discretizedTime / powSquare(properties.subDivisionSize))
                          * cells[i].value
-                         + (properties.discretizedTime / pow(properties.subDivisionSize, 2))
+                         + (properties.discretizedTime / powSquare(properties.subDivisionSize))
                          * (cells[i].valueMinusPosXOne + cells[i].valuePlusPosXOne
                             + cells[i].valueMinusPosYOne + cells[i].valuePlusPosYOne);
     }
@@ -478,9 +483,9 @@ double processSequential(struct TransformationProperties properties) {
 
                 if (i > 0 && j > 0 && i < properties.sizeX - 1 && j < properties.sizeY - 1) {
 
-                    value = (1 - 4 * properties.discretizedTime / pow(properties.subDivisionSize, 2))
+                    value = (1 - 4 * properties.discretizedTime / powSquare(properties.subDivisionSize))
                                  * data[i][j]
-                                 + (properties.discretizedTime / pow(properties.subDivisionSize, 2))
+                                 + (properties.discretizedTime / powSquare(properties.subDivisionSize))
                                    * (data[i - 1][j] + data[i + 1][j] + data[i][j - 1] + data[i][j + 1]);
                 }
 
