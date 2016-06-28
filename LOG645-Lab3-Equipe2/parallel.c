@@ -7,15 +7,18 @@
 #include <stdbool.h>
 #include <string.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #define CELL_STRUCTURE_SIZE 7
+
+const int WAIT_TIME = 5;
 
 struct TransformationProperties {
     int sizeX;
     int sizeY;
     int iterations;
-    int discretizedTime;
-    int subDivisionSize;
+    double discretizedTime;
+    double subDivisionSize;
 };
 
 struct Topology {
@@ -35,11 +38,11 @@ struct MPIParams {
 typedef struct Cell {
     int posX;
     int posY;
-    int value;
-    int valueMinusPosXOne;
-    int valuePlusPosXOne;
-    int valueMinusPosYOne;
-    int valuePlusPosYOne;
+    double value;
+    double valueMinusPosXOne;
+    double valuePlusPosXOne;
+    double valueMinusPosYOne;
+    double valuePlusPosYOne;
 } cell;
 
 MPI_Datatype mpiCellType;
@@ -51,10 +54,15 @@ struct TransformationProperties buildProperties(char *argv[]) {
     properties.sizeX = atoi(argv[1]);
     properties.sizeY = atoi(argv[2]);
     properties.iterations = atoi(argv[3]);
-    properties.discretizedTime = atoi(argv[4]);
-    properties.subDivisionSize = atoi(argv[5]);
+    sscanf(argv[4], "%lf", &properties.discretizedTime);
+    sscanf(argv[5], "%lf", &properties.subDivisionSize);
 
     return properties;
+}
+
+bool isRootProcess(int rank) {
+
+    return rank == 0;
 }
 
 double getTimeDifferenceMS(struct timeval startTime, struct timeval endTime) {
@@ -65,44 +73,145 @@ double getTimeDifferenceMS(struct timeval startTime, struct timeval endTime) {
     return elapsedTime;
 }
 
-int powSquare(int value) {
+int powSquare(double value) {
 
     return value * value;
 }
 
-struct Cell addAdjacentValuesToCell(struct Cell cell, int valueMinusPosXOne, int valuePlusPosXOne,
-                                   int valueMinusPosYOne, int valuePlusPosYOne) {
+void printWithFormat(float value) {
 
-    cell.valueMinusPosXOne = valueMinusPosXOne;
-    cell.valuePlusPosXOne = valuePlusPosXOne;
-    cell.valueMinusPosYOne = valueMinusPosYOne;
-    cell.valuePlusPosYOne = valuePlusPosYOne;
-
-    return cell;
+    printf("%-10.2f|", value);
 }
 
-struct Cell buildCell(int posX, int posY, int value) {
+void printProblemInitialization(char* solvingType) {
+
+    printf("\nProblem solving type : %s.\nStarting process...\n\n", solvingType);
+}
+
+double** createArraySequential(struct TransformationProperties properties) {
+
+    double** array;
+    int i, j;
+
+    array = (double**) malloc(properties.sizeX * sizeof(double*));
+    for (i = 0; i < properties.sizeX; i++) {
+
+        array[i] = (double*) malloc(properties.sizeY * sizeof(double));
+
+        for (j = 0; j < properties.sizeY; j++) {
+
+            array[i][j] = (i * (properties.sizeX - i - 1)) * (j * (properties.sizeY - j - 1));
+        }
+    }
+
+    return array;
+}
+
+void printSequentialData(struct TransformationProperties properties, double** data, double elapsedTime) {
+
+    printf("Time taken : %f ms.\n", elapsedTime);
+    printf("Results : \n");
+
+    int i, j;
+
+    for (i = 0; i < properties.sizeX; ++i) {
+
+        for (j = 0; j < properties.sizeY; ++j) {
+
+            printWithFormat(data[i][j]);
+        }
+
+        printf("\n");
+    }
+
+    printf("\n\n");
+}
+
+double processSequential(struct TransformationProperties properties) {
+
+    printProblemInitialization("Sequential");
+
+    struct timeval startTime, endTime;
+    gettimeofday(&startTime, NULL);
+
+    double** data = createArraySequential(properties);
+    double value;
+
+    int i, j, k;
+    for (k = 1; k < properties.iterations; ++k) {
+
+        for (i = 0; i < properties.sizeX; ++i) {
+
+            for (j = 0; j < properties.sizeY; ++j) {
+
+                usleep(WAIT_TIME);
+
+                value = 0;
+
+                if (i > 0 && j > 0 && i < properties.sizeX - 1 && j < properties.sizeY - 1) {
+
+                    value = (1 - 4 * properties.discretizedTime / powSquare(properties.subDivisionSize))
+                            * data[i][j]
+                            + (properties.discretizedTime / powSquare(properties.subDivisionSize))
+                            * (data[i - 1][j] + data[i + 1][j] + data[i][j - 1] + data[i][j + 1]);
+                }
+
+                data[i][j] = value;
+            }
+        }
+    }
+
+    gettimeofday(&endTime, NULL);
+    double elapsedTime = getTimeDifferenceMS(startTime, endTime);
+
+    printSequentialData(properties, data, elapsedTime);
+
+    return elapsedTime;
+}
+
+void printInitialization(struct TransformationProperties properties) {
+
+    printf("\nProperties : \n");
+    printf("    Size X : %d\n", properties.sizeX);
+    printf("    Size Y : %d\n", properties.sizeY);
+    printf("    Iterations : %d\n", properties.iterations);
+    printf("    Discretized time : %f\n", properties.discretizedTime);
+    printf("    Subdivision size : %f\n", properties.subDivisionSize);
+    printf("    Matrix %d x %d\n\n", properties.sizeX, properties.sizeY);
+    printf("----------------------------------------------------\n");
+}
+
+void compareProcesses(double timeSequential, double timeParallel) {
+
+    double acceleration = timeSequential / timeParallel;
+
+    printf("----------------------------------------------------\n\n");
+    printf("Acceleration = Time sequential / Time parallel\n");
+    printf("             = %f ms / %f ms\n", timeSequential, timeParallel);
+    printf("             = %f\n", acceleration);
+}
+
+struct Cell buildCell(int posX, int posY, double value) {
 
     struct Cell cell;
 
     cell.posX = posX;
     cell.posY = posY;
     cell.value = value;
+    cell.valueMinusPosXOne = 0.00;
+    cell.valuePlusPosXOne = 0.00;
+    cell.valueMinusPosYOne = 0.00;
+    cell.valuePlusPosYOne = 0.00;
 
     return cell;
 }
 
-bool isCellPadding(int i, int sizeX, int sizeY) {
+bool isCellPadding(int i, int sizeY, int dataSize) {
 
-    bool isPaddingHorizontal = i % sizeY == 0 || i % sizeY == sizeY - 1;
-    bool isPaddingVertical = i % sizeX == 0 || i % sizeX == sizeX - 1;
+    bool isPaddingHorizontal = i < sizeY || i > dataSize - sizeY;
+    bool isPaddingVertical = i % sizeY == 0 || i % sizeY == sizeY - 1;
 
     return isPaddingHorizontal || isPaddingVertical;
-}
-
-void printWithFormat(int value) {
-
-    printf("%-10d|", value);
 }
 
 void printCells(struct Cell* cells, struct TransformationProperties properties, double elapsedTime) {
@@ -110,38 +219,53 @@ void printCells(struct Cell* cells, struct TransformationProperties properties, 
     printf("Time taken : %f ms.\n", elapsedTime);
     printf("Results : \n");
 
-    int i, dataSize = properties.sizeX * properties.sizeY;
+    int i, j = 0, fullSize = properties.sizeX * properties.sizeY;
 
-    for (i = 0; i < dataSize; ++i) {
+    for (i = 0; i < fullSize; ++i) {
 
-        if (i > 0 && i % properties.sizeX == 0) {
+        if (i > 0 && i % properties.sizeY == 0) {
 
             printf("\n");
         }
 
-        if (isCellPadding(i, properties.sizeX, properties.sizeY)) {
+        if (isCellPadding(i, properties.sizeY, fullSize)) {
 
             printWithFormat(0);
         }
         else {
 
-            printWithFormat(cells[i].value);
+            printWithFormat(cells[j++].value);
         }
     }
 
     printf("\n\n");
 }
 
-struct Cell* addAdjacentValuesToCells(int innerSizeX, int innerSizeY, struct Cell* cells, int sizeCells) {
+struct Cell* addAdjacentValuesToCells(int innerSizeY, struct Cell* cells, int sizeCells) {
 
     int i;
 
     for (i = 0; i < sizeCells; ++i) {
 
-        cells[i].valueMinusPosXOne = cells[i].posX > 1 ? cells[i - 1].value : 0;
-        cells[i].valuePlusPosXOne = cells[i].posX < innerSizeX ? cells[i + 1].value : 0;
-        cells[i].valueMinusPosYOne = cells[i].posY > 1 ? cells[i - innerSizeX].value : 0;
-        cells[i].valuePlusPosYOne = cells[i].posY < innerSizeY ? cells[i + innerSizeX].value: 0;
+        if (i % innerSizeY != 0) {
+
+            cells[i].valueMinusPosXOne = cells[i - 1].value;
+        }
+
+        if (i % innerSizeY != innerSizeY - 1) {
+
+            cells[i].valuePlusPosXOne = cells[i + 1].value;
+        }
+
+        if (i >= innerSizeY) {
+
+            cells[i].valueMinusPosYOne = cells[i - innerSizeY].value;
+        }
+
+        if (i < sizeCells - innerSizeY) {
+
+            cells[i].valuePlusPosYOne = cells[i + innerSizeY].value;
+        }
     }
 
     return cells;
@@ -158,7 +282,7 @@ struct Cell* createCells(struct TransformationProperties properties) {
 
         for (posY = 1; posY < properties.sizeY - 1; posY++) {
 
-            int value = (posX * (properties.sizeX - posX - 1)) * (posY * (properties.sizeY - posY - 1));
+            double value = (posX * (properties.sizeX - posX - 1)) * (posY * (properties.sizeY - posY - 1));
             cells[i++] = buildCell(posX, posY, value);
         }
     }
@@ -171,6 +295,8 @@ struct Cell* computeProblem(struct Cell* cells, int subsetSize, int iteration, s
     int i;
 
     for (i = 0; i < subsetSize; ++i) {
+
+        usleep(WAIT_TIME);
 
         cells[i].value = (1 - 4 * properties.discretizedTime / powSquare(properties.subDivisionSize))
                          * cells[i].value
@@ -187,7 +313,7 @@ void createCellStructure() {
     const int countStructureCell = CELL_STRUCTURE_SIZE;
 
     int blockLengths[CELL_STRUCTURE_SIZE] = {1, 1, 1, 1, 1, 1, 1};
-    MPI_Datatype types[CELL_STRUCTURE_SIZE] = {MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_INT};
+    MPI_Datatype types[CELL_STRUCTURE_SIZE] = {MPI_INT, MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
     MPI_Aint offsets[CELL_STRUCTURE_SIZE];
 
     offsets[0] = offsetof(cell, posX);
@@ -225,7 +351,7 @@ struct Topology initWorldTopology(struct TransformationProperties properties) {
     worldTopology.comm = MPI_COMM_WORLD;
     worldTopology.rank = getCommRank(worldTopology.comm);
     worldTopology.size = getCommSize(worldTopology.comm);
-    worldTopology.dataSize = properties.sizeX * properties.sizeY - ((2 * properties.sizeX + 2 * properties.sizeY) - 4);
+    worldTopology.dataSize = properties.sizeX - 2 * properties.sizeY - 2;
 
     return worldTopology;
 }
@@ -280,7 +406,7 @@ struct MPIParams initMPI(int argc, char *argv[], struct TransformationProperties
     mpiParams.main = initMainTopology(mpiParams.world, nbLeftOvers);
     mpiParams.leftOver = initLeftOverTopology(mpiParams.world, nbLeftOvers);
 
-    if (mpiParams.world.rank == 0) {
+    if (isRootProcess(mpiParams.world.rank)) {
 
         mpiParams.initData = createCells(properties);
     }
@@ -288,14 +414,9 @@ struct MPIParams initMPI(int argc, char *argv[], struct TransformationProperties
     return mpiParams;
 }
 
-bool isRootProcess(int worldRank) {
-
-    return worldRank == 0;
-}
-
 struct Cell* initCellsOfSize(int size) {
 
-    return (struct Cell*)malloc(sizeof(struct Cell) * size);
+    return (struct Cell*) malloc(sizeof(struct Cell) * size);
 }
 
 
@@ -320,26 +441,20 @@ struct Cell* scatterByTopologyCore(struct TransformationProperties properties, s
     return processedCells;
 }
 
-struct Cell* scatterMainCells(struct MPIParams mpiParams, struct Cell* data,
+struct Cell* scatterMainCells(struct Topology main, struct Cell* mainCells,
                               struct TransformationProperties properties, int i) {
 
-    struct Cell* mainCells = initCellsOfSize(mpiParams.main.dataSize);
-    memcpy(mainCells, data, mpiParams.main.dataSize * sizeof(struct Cell));
+    int subsetSizeMain = main.dataSize / main.size;
 
-    int subsetSizeMain = mpiParams.main.dataSize / mpiParams.main.size;
-
-    return scatterByTopologyCore(properties, mpiParams.main, mainCells, subsetSizeMain, i);
+    return scatterByTopologyCore(properties, main, mainCells, subsetSizeMain, i);
 }
 
-struct Cell* scatterLeftOverCells(struct MPIParams mpiParams, struct Cell* data,
+struct Cell* scatterLeftOverCells(struct Topology leftOver, struct Cell* leftOverCells,
                                   struct TransformationProperties properties, int i) {
-
-    struct Cell* leftOverCells = initCellsOfSize(mpiParams.leftOver.dataSize);
-    memcpy(leftOverCells, data + mpiParams.main.dataSize, mpiParams.leftOver.dataSize * sizeof(struct Cell));
 
     int subsetSizeLeftOver = 1;
 
-    return scatterByTopologyCore(properties, mpiParams.leftOver, leftOverCells, subsetSizeLeftOver, i);
+    return scatterByTopologyCore(properties, leftOver, leftOverCells, subsetSizeLeftOver, i);
 }
 
 struct Cell* concatenateCells(struct Cell* mainCells, int mainCellsSize,
@@ -357,171 +472,96 @@ struct Cell* concatenateCells(struct Cell* mainCells, int mainCellsSize,
     return data;
 }
 
-void printProblemInitialization(char* solvingType) {
+void endProcess(struct Cell* data, struct TransformationProperties properties, struct timeval startTime) {
 
-    printf("\nProblem solving type : %s.\nStarting process...\n\n", solvingType);
+    struct timeval endTime;
+    gettimeofday(&endTime, NULL);
+    double timeParallel = getTimeDifferenceMS(startTime, endTime);
+
+    printCells(data, properties, timeParallel);
+    free(data);
+
+    double timeSequential = processSequential(properties);
+
+    compareProcesses(timeParallel, timeSequential);
 }
 
-double processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, struct timeval startTime) {
+void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, struct timeval startTime) {
 
-    struct Cell* data = mpiParams.initData;
+    struct Cell* data = NULL;
 
-    int i, innerSizeX = properties.sizeX - 2, innerSizeY = properties.sizeY - 2;
-    int innerSize = innerSizeX * innerSizeY;
-    double elapsedTime = 0;
+    int i, innerSizeY, innerSize;
+
+    if (isRootProcess(mpiParams.world.rank)) {
+
+        innerSizeY = properties.sizeY - 2;
+        innerSize = properties.sizeX - 2 * innerSizeY;
+
+        data = mpiParams.initData;
+    }
 
     for (i = 1; i < properties.iterations; ++i) {
 
-        data = addAdjacentValuesToCells(innerSizeX, innerSizeY, data, innerSize);
-
         struct Cell* mainCells = NULL;
+        struct Cell* leftOverCells = NULL;
+
+        if (isRootProcess(mpiParams.world.rank)) {
+
+            data = addAdjacentValuesToCells(innerSizeY, mpiParams.initData, innerSize);
+
+            mainCells = initCellsOfSize(mpiParams.main.dataSize);
+            memcpy(mainCells, data, mpiParams.main.dataSize * sizeof(struct Cell));
+
+            if (mpiParams.leftOver.dataSize > 0) {
+
+                leftOverCells = initCellsOfSize(mpiParams.leftOver.dataSize);
+                memcpy(leftOverCells, data + mpiParams.main.dataSize, mpiParams.leftOver.dataSize * sizeof(struct Cell));
+            }
+        }
 
         if (mpiParams.world.rank < mpiParams.main.dataSize) {
 
-            scatterMainCells(mpiParams, data, properties, i);
+            mainCells = scatterMainCells(mpiParams.main, mainCells, properties, i);
         }
-
-        struct Cell* leftOverCells = NULL;
 
         if (mpiParams.world.rank < mpiParams.leftOver.dataSize) {
 
-            scatterLeftOverCells(mpiParams, data, properties, i);
+            leftOverCells = scatterLeftOverCells(mpiParams.leftOver, leftOverCells, properties, i);
         }
 
-        data = concatenateCells(mainCells, mpiParams.main.dataSize, leftOverCells, mpiParams.leftOver.dataSize);
+        MPI_Barrier(mpiParams.main.comm);
+        MPI_Barrier(mpiParams.leftOver.comm);
 
-        free(mainCells);
-        free(leftOverCells);
+        if (isRootProcess(mpiParams.world.rank)) {
+
+            data = concatenateCells(mainCells, mpiParams.main.dataSize, leftOverCells, mpiParams.leftOver.dataSize);
+
+            free(mainCells);
+            free(leftOverCells);
+        }
     }
 
     if (isRootProcess(mpiParams.world.rank)) {
 
-        struct timeval endTime;
-        gettimeofday(&endTime, NULL);
-        double elapsedTime = getTimeDifferenceMS(startTime, endTime);
-
-        printCells(data, properties, elapsedTime);
+        endProcess(data, properties, startTime);
     }
-
-    free(data);
-
-    return elapsedTime;
 }
 
-double processParallel(struct TransformationProperties properties, int argc, char *argv[]) {
+void processParallel(struct TransformationProperties properties, int argc, char *argv[]) {
 
     struct timeval startTime;
     struct MPIParams mpiParams = initMPI(argc, argv, properties);
 
     if (isRootProcess(mpiParams.world.rank)) {
 
+        printInitialization(properties);
         printProblemInitialization("Parallel MPI");
         gettimeofday(&startTime, NULL);
     }
 
-    double elapsedTIme = processProblemCore(mpiParams, properties, startTime);
+    processProblemCore(mpiParams, properties, startTime);
 
     MPI_Finalize();
-
-    return elapsedTIme;
-}
-
-int** createArraySequential(struct TransformationProperties properties) {
-
-    int** array;
-    int i, j;
-
-    array = (int**) malloc(properties.sizeX * sizeof(int*));
-    for (i = 0; i < properties.sizeX; i++) {
-
-        array[i] = (int*) malloc(properties.sizeY * sizeof(int));
-
-        for (j = 0; j < properties.sizeY; j++) {
-
-            array[i][j] = (i * (properties.sizeX - i - 1)) * (j * (properties.sizeY - j - 1));
-        }
-    }
-
-    return array;
-}
-
-void printSequentialData(struct TransformationProperties properties, int** data, double elapsedTime) {
-
-    printf("Time taken : %f ms.\n", elapsedTime);
-    printf("Results : \n");
-
-    int i, j;
-
-    for (i = 0; i < properties.sizeX; ++i) {
-
-        for (j = 0; j < properties.sizeY; ++j) {
-
-            printWithFormat(data[i][j]);
-        }
-    }
-
-    printf("\n\n");
-}
-
-double processSequential(struct TransformationProperties properties) {
-
-    printProblemInitialization("Sequential");
-
-    struct timeval startTime, endTime;
-    gettimeofday(&startTime, NULL);
-
-    int** data = createArraySequential(properties);
-
-    int i, j, k;
-    for (k = 1; k < properties.iterations; ++k) {
-
-        for (i = 0; i < properties.sizeX; ++i) {
-
-            for (j = 0; j < properties.sizeY; ++j) {
-
-                int value = 0;
-
-                if (i > 0 && j > 0 && i < properties.sizeX - 1 && j < properties.sizeY - 1) {
-
-                    value = (1 - 4 * properties.discretizedTime / powSquare(properties.subDivisionSize))
-                                 * data[i][j]
-                                 + (properties.discretizedTime / powSquare(properties.subDivisionSize))
-                                   * (data[i - 1][j] + data[i + 1][j] + data[i][j - 1] + data[i][j + 1]);
-                }
-
-                data[i][j] = value;
-            }
-        }
-    }
-
-    gettimeofday(&endTime, NULL);
-    double elapsedTime = getTimeDifferenceMS(startTime, endTime);
-
-    printSequentialData(properties, data, elapsedTime);
-
-    return elapsedTime;
-}
-
-void printInitialization(struct TransformationProperties properties) {
-
-    printf("\nProperties : \n");
-    printf("    Size X : %d\n", properties.sizeX);
-    printf("    Size Y : %d\n", properties.sizeY);
-    printf("    Iterations : %d\n", properties.iterations);
-    printf("    Discretized time : %d\n", properties.discretizedTime);
-    printf("    Subdivision size : %d\n", properties.subDivisionSize);
-    printf("    Matrix %d x %d\n\n", properties.sizeX, properties.sizeY);
-    printf("----------------------------------------------------\n");
-}
-
-void compareProcesses(double timeSequential, double timeParallel) {
-
-    double acceleration = timeSequential / timeParallel;
-
-    printf("----------------------------------------------------\n\n");
-    printf("Acceleration = Time sequential / Time parallel\n");
-    printf("             = %f ms / %f ms\n", timeSequential, timeParallel);
-    printf("             = %f\n", acceleration);
 }
 
 int main(int argc, char *argv[]) {
@@ -530,10 +570,7 @@ int main(int argc, char *argv[]) {
 
         struct TransformationProperties properties = buildProperties(argv);
 
-        double timeParallel = processParallel(properties, argc, argv);
-        double timeSequential = processSequential(properties);
-
-        compareProcesses(timeParallel, timeSequential);
+        processParallel(properties, argc, argv);
     }
     else {
 
