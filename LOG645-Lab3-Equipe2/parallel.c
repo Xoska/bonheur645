@@ -324,12 +324,6 @@ struct Cell* computeProblem(struct Cell* cells, int subsetSize, int iteration, s
                 + (properties.discretizedTime / powSquare(properties.subDivisionSize))
                   * (cells[i].valueMinusPosXOne + cells[i].valuePlusPosXOne
                      + cells[i].valueMinusPosYOne + cells[i].valuePlusPosYOne);
-/*
-        printf("(1 - 4 * %f / (%f*%f)) * %f + (%f / (%f*%f)) * (%f + %f + %f + %f) = %f\n",
-               properties.discretizedTime, properties.subDivisionSize, properties.subDivisionSize, cells[i].value,
-               properties.discretizedTime, properties.subDivisionSize, properties.subDivisionSize,
-               cells[i].valueMinusPosXOne, cells[i].valuePlusPosXOne, cells[i].valueMinusPosYOne, cells[i].valuePlusPosYOne, value);
-               */
     }
 
     return cells;
@@ -530,34 +524,18 @@ void endProcess(struct Cell* data, struct TransformationProperties properties, s
 
     double timeSequential = processSequential(properties);
 
-    compareProcesses(timeParallel, timeSequential);
+    compareProcesses(timeSequential, timeParallel);
 }
-/*
-void printShits(struct Cell* cells, int size, char* title) {
 
-    printf("Voici le tableau intermediaire de : %s", title);
-
-    int i;
-
-    for (i = 0; i < size; ++i) {
-
-        printf("Valeur %d : %f\n", i, cells[i].value);
-    }
-
-    printf("\n\n");
-}
-*/
 void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, struct timeval startTime) {
 
     struct Cell* data = NULL;
     int i, innerSizeY, innerSize;
-    bool hasLeftOver;
 
     if (isRootProcess(mpiParams.world.rank)) {
 
         innerSizeY = properties.sizeY - 2;
         innerSize = (properties.sizeX - 2) * innerSizeY;
-        hasLeftOver = mpiParams.leftOver.dataSize > 0;
 
         data = mpiParams.initData;
     }
@@ -571,22 +549,20 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
 
             data = addAdjacentValuesToCells(innerSizeY, data, innerSize);
 
-            if (!hasLeftOver) {
+            if (mpiParams.leftOver.dataSize == 0) {
 
                 mainCells = data;
             }
             else {
 
                 mainCells = extractCells(data, 0, mpiParams.main.dataSize);
-                leftOverCells = extractCells(data, mpiParams.main.dataSize, mpiParams.world.size);
+                leftOverCells = extractCells(data, mpiParams.main.dataSize, mpiParams.world.dataSize);
             }
         }
 
         if (mpiParams.world.rank < mpiParams.main.dataSize) {
 
- //           printShits(mainCells, mpiParams.main.dataSize, "maincells avant scatter");
             mainCells = scatterMainCells(mpiParams.main, mainCells, properties, i);
-  //          printShits(mainCells, mpiParams.main.dataSize, "maincells apres scatter");
         }
 
         if (mpiParams.world.rank < mpiParams.leftOver.dataSize) {
