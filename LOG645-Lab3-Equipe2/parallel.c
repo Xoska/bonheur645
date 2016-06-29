@@ -233,7 +233,6 @@ void printCells(struct Cell* cells, struct TransformationProperties properties, 
             printWithFormat(0);
         }
         else {
-
             printWithFormat(cells[j++].value);
         }
     }
@@ -277,12 +276,13 @@ struct Cell* createCells(struct TransformationProperties properties) {
 
     int i = 0;
     int posX, posY;
+    double value;
 
     for (posX = 1; posX < properties.sizeX - 1; posX++) {
 
         for (posY = 1; posY < properties.sizeY - 1; posY++) {
 
-            double value = (posX * (properties.sizeX - posX - 1)) * (posY * (properties.sizeY - posY - 1));
+            value = (posX * (properties.sizeX - posX - 1)) * (posY * (properties.sizeY - posY - 1));
             cells[i++] = buildCell(posX, posY, value);
         }
     }
@@ -351,7 +351,7 @@ struct Topology initWorldTopology(struct TransformationProperties properties) {
     worldTopology.comm = MPI_COMM_WORLD;
     worldTopology.rank = getCommRank(worldTopology.comm);
     worldTopology.size = getCommSize(worldTopology.comm);
-    worldTopology.dataSize = properties.sizeX - 2 * properties.sizeY - 2;
+    worldTopology.dataSize = (properties.sizeX - 2) * (properties.sizeY - 2);
 
     return worldTopology;
 }
@@ -420,6 +420,19 @@ struct Cell* initCellsOfSize(int size) {
 }
 
 
+struct Cell* extractCells(struct Cell* cells, int posStart, int posEnd) {
+
+    int length = posEnd - posStart, i, pos = 0;
+    struct Cell* newCells = initCellsOfSize(length);
+
+    for (i = posStart; i < posEnd; ++i) {
+
+        newCells[pos++] = cells[i];
+    }
+
+    return newCells;
+}
+
 struct Cell* scatterByTopologyCore(struct TransformationProperties properties, struct Topology topology,
                                    struct Cell* cells, int subsetSize, int iteration) {
 
@@ -460,13 +473,20 @@ struct Cell* scatterLeftOverCells(struct Topology leftOver, struct Cell* leftOve
 struct Cell* concatenateCells(struct Cell* mainCells, int mainCellsSize,
                               struct Cell* leftoverCells, int leftoverCellsSize) {
 
-    struct Cell* data = malloc(sizeof(struct Cell) * mainCellsSize + leftoverCellsSize);
+    struct Cell* data = initCellsOfSize(mainCellsSize + leftoverCellsSize);
+    int pos = 0, i;
 
-    memcpy(data, mainCells, mainCellsSize * sizeof(struct Cell));
+    for (i = 0; i < mainCellsSize; ++i) {
+
+        data[pos++] = mainCells[i];
+    }
 
     if (leftoverCellsSize > 0) {
 
-        memcpy(data + mainCellsSize, leftoverCells, leftoverCellsSize * sizeof(struct Cell));
+        for (i = 0; i < leftoverCellsSize; ++i) {
+
+            data[pos++] = leftoverCells[i];
+        }
     }
 
     return data;
@@ -489,13 +509,14 @@ void endProcess(struct Cell* data, struct TransformationProperties properties, s
 void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, struct timeval startTime) {
 
     struct Cell* data = NULL;
-
     int i, innerSizeY, innerSize;
+    bool hasLeftOver;
 
     if (isRootProcess(mpiParams.world.rank)) {
 
         innerSizeY = properties.sizeY - 2;
         innerSize = properties.sizeX - 2 * innerSizeY;
+        hasLeftOver = mpiParams.leftOver.dataSize > 0;
 
         data = mpiParams.initData;
     }
@@ -509,16 +530,17 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
 
             data = addAdjacentValuesToCells(innerSizeY, mpiParams.initData, innerSize);
 
-            mainCells = initCellsOfSize(mpiParams.main.dataSize);
-            memcpy(mainCells, data, mpiParams.main.dataSize * sizeof(struct Cell));
+            if (!hasLeftOver) {
 
-            if (mpiParams.leftOver.dataSize > 0) {
+                mainCells = data;
+            }
+            else {
 
-                leftOverCells = initCellsOfSize(mpiParams.leftOver.dataSize);
-                memcpy(leftOverCells, data + mpiParams.main.dataSize, mpiParams.leftOver.dataSize * sizeof(struct Cell));
+                mainCells = extractCells(data, 0, mpiParams.main.dataSize);
+                leftOverCells = extractCells(data, mpiParams.main.dataSize, mpiParams.world.size);
             }
         }
-
+/*
         if (mpiParams.world.rank < mpiParams.main.dataSize) {
 
             mainCells = scatterMainCells(mpiParams.main, mainCells, properties, i);
@@ -531,13 +553,10 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
 
         MPI_Barrier(mpiParams.main.comm);
         MPI_Barrier(mpiParams.leftOver.comm);
-
+*/
         if (isRootProcess(mpiParams.world.rank)) {
 
             data = concatenateCells(mainCells, mpiParams.main.dataSize, leftOverCells, mpiParams.leftOver.dataSize);
-
-            free(mainCells);
-            free(leftOverCells);
         }
     }
 
