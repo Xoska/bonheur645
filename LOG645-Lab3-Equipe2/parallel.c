@@ -107,6 +107,25 @@ double** createArraySequential(struct TransformationProperties properties) {
     return array;
 }
 
+double** copyMatrix(struct TransformationProperties properties, double** matrix) {
+
+    double** newMatrix;
+    int i, j;
+
+    newMatrix = (double**) malloc(properties.sizeX * sizeof(double*));
+    for (i = 0; i < properties.sizeX; i++) {
+
+        newMatrix[i] = (double*) malloc(properties.sizeY * sizeof(double));
+
+        for (j = 0; j < properties.sizeY; j++) {
+
+            newMatrix[i][j] = matrix[i][j];
+        }
+    }
+
+    return newMatrix;
+}
+
 void printSequentialData(struct TransformationProperties properties, double** data, double elapsedTime) {
 
     printf("Time taken : %f ms.\n", elapsedTime);
@@ -134,11 +153,13 @@ double processSequential(struct TransformationProperties properties) {
     struct timeval startTime, endTime;
     gettimeofday(&startTime, NULL);
 
-    double** data = createArraySequential(properties);
+    double** processedData = createArraySequential(properties);
     double value;
 
     int i, j, k;
     for (k = 1; k < properties.iterations; ++k) {
+
+        double** originalData = copyMatrix(properties, processedData);
 
         for (i = 0; i < properties.sizeX; ++i) {
 
@@ -151,12 +172,12 @@ double processSequential(struct TransformationProperties properties) {
                 if (i > 0 && j > 0 && i < properties.sizeX - 1 && j < properties.sizeY - 1) {
 
                     value = (1 - 4 * properties.discretizedTime / powSquare(properties.subDivisionSize))
-                            * data[i][j]
+                            * originalData[i][j]
                             + (properties.discretizedTime / powSquare(properties.subDivisionSize))
-                            * (data[i - 1][j] + data[i + 1][j] + data[i][j - 1] + data[i][j + 1]);
+                            * (originalData[i - 1][j] + originalData[i + 1][j] + originalData[i][j - 1] + originalData[i][j + 1]);
                 }
 
-                data[i][j] = value;
+                processedData[i][j] = value;
             }
         }
     }
@@ -164,7 +185,7 @@ double processSequential(struct TransformationProperties properties) {
     gettimeofday(&endTime, NULL);
     double elapsedTime = getTimeDifferenceMS(startTime, endTime);
 
-    printSequentialData(properties, data, elapsedTime);
+    printSequentialData(properties, processedData, elapsedTime);
 
     return elapsedTime;
 }
@@ -299,10 +320,16 @@ struct Cell* computeProblem(struct Cell* cells, int subsetSize, int iteration, s
         usleep(WAIT_TIME);
 
         cells[i].value = (1 - 4 * properties.discretizedTime / powSquare(properties.subDivisionSize))
-                         * cells[i].value
-                         + (properties.discretizedTime / powSquare(properties.subDivisionSize))
-                         * (cells[i].valueMinusPosXOne + cells[i].valuePlusPosXOne
-                            + cells[i].valueMinusPosYOne + cells[i].valuePlusPosYOne);
+                * cells[i].value
+                + (properties.discretizedTime / powSquare(properties.subDivisionSize))
+                  * (cells[i].valueMinusPosXOne + cells[i].valuePlusPosXOne
+                     + cells[i].valueMinusPosYOne + cells[i].valuePlusPosYOne);
+/*
+        printf("(1 - 4 * %f / (%f*%f)) * %f + (%f / (%f*%f)) * (%f + %f + %f + %f) = %f\n",
+               properties.discretizedTime, properties.subDivisionSize, properties.subDivisionSize, cells[i].value,
+               properties.discretizedTime, properties.subDivisionSize, properties.subDivisionSize,
+               cells[i].valueMinusPosXOne, cells[i].valuePlusPosXOne, cells[i].valueMinusPosYOne, cells[i].valuePlusPosYOne, value);
+               */
     }
 
     return cells;
@@ -505,7 +532,21 @@ void endProcess(struct Cell* data, struct TransformationProperties properties, s
 
     compareProcesses(timeParallel, timeSequential);
 }
+/*
+void printShits(struct Cell* cells, int size, char* title) {
 
+    printf("Voici le tableau intermediaire de : %s", title);
+
+    int i;
+
+    for (i = 0; i < size; ++i) {
+
+        printf("Valeur %d : %f\n", i, cells[i].value);
+    }
+
+    printf("\n\n");
+}
+*/
 void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, struct timeval startTime) {
 
     struct Cell* data = NULL;
@@ -515,7 +556,7 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
     if (isRootProcess(mpiParams.world.rank)) {
 
         innerSizeY = properties.sizeY - 2;
-        innerSize = properties.sizeX - 2 * innerSizeY;
+        innerSize = (properties.sizeX - 2) * innerSizeY;
         hasLeftOver = mpiParams.leftOver.dataSize > 0;
 
         data = mpiParams.initData;
@@ -528,7 +569,7 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
 
         if (isRootProcess(mpiParams.world.rank)) {
 
-            data = addAdjacentValuesToCells(innerSizeY, mpiParams.initData, innerSize);
+            data = addAdjacentValuesToCells(innerSizeY, data, innerSize);
 
             if (!hasLeftOver) {
 
@@ -540,10 +581,12 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
                 leftOverCells = extractCells(data, mpiParams.main.dataSize, mpiParams.world.size);
             }
         }
-/*
+
         if (mpiParams.world.rank < mpiParams.main.dataSize) {
 
+ //           printShits(mainCells, mpiParams.main.dataSize, "maincells avant scatter");
             mainCells = scatterMainCells(mpiParams.main, mainCells, properties, i);
+  //          printShits(mainCells, mpiParams.main.dataSize, "maincells apres scatter");
         }
 
         if (mpiParams.world.rank < mpiParams.leftOver.dataSize) {
@@ -553,7 +596,7 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
 
         MPI_Barrier(mpiParams.main.comm);
         MPI_Barrier(mpiParams.leftOver.comm);
-*/
+
         if (isRootProcess(mpiParams.world.rank)) {
 
             data = concatenateCells(mainCells, mpiParams.main.dataSize, leftOverCells, mpiParams.leftOver.dataSize);
