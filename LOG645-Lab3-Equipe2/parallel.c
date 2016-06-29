@@ -9,10 +9,20 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+/**
+ * Constante pour le nombre de block du nouveau type MPI.
+ */
 #define CELL_STRUCTURE_SIZE 7
 
+/**
+ * Constante pour l'attente de 5 micro-secondes lors d'un traitement.
+ */
 const int WAIT_TIME = 5;
 
+/**
+ * Structure comportant toutes les informations entrées par l'utilisateurs.
+ * Il s'agit des variables d'exécution.
+ */
 struct TransformationProperties {
     int sizeX;
     int sizeY;
@@ -21,6 +31,10 @@ struct TransformationProperties {
     double subDivisionSize;
 };
 
+/**
+ * Chaque topologie, que ce soit world ou un groupe custom, est toujours associée à
+ * une communicateur et elles ont un rang, une taille et la taille de ses données associées.
+ */
 struct Topology {
     MPI_Comm comm;
     int rank;
@@ -28,6 +42,9 @@ struct Topology {
     int dataSize;
 };
 
+/**
+ * Structure comportant toutes les topologies nécessaire à l'exécution et les données d'initialisation.
+ */
 struct MPIParams {
     struct Cell* initData;
     struct Topology world;
@@ -35,6 +52,11 @@ struct MPIParams {
     struct Topology leftOver;
 };
 
+/**
+ * Structure comportant toutes les informations associé à une cellule. Chaque processeurs recevront
+ * un ensemble de cellules dont chacune contient les valeurs nécessaires pour le calcul parallèle.
+ * Cette structure correspond au nouveau type MPI.
+ */
 typedef struct Cell {
     int posX;
     int posY;
@@ -45,8 +67,15 @@ typedef struct Cell {
     double valuePlusPosYOne;
 } cell;
 
+/**
+ * Nouveau type MPI pour le passage des cellules dans les messages.
+ */
 MPI_Datatype mpiCellType;
 
+/**
+ * S'occupe d'initialiser la structure des propriétés d'exécutions entrées par l'utilisateur.
+ * Donc, avec les données entrées à la ligne de commande, on retourne les variables d'exécution.
+ */
 struct TransformationProperties buildProperties(char *argv[]) {
 
     struct TransformationProperties properties;
@@ -60,11 +89,19 @@ struct TransformationProperties buildProperties(char *argv[]) {
     return properties;
 }
 
+/**
+ * Détermine si le rang passé en paramètre est root, c'est-à-dire un rang de zéro.
+ */
 bool isRootProcess(int rank) {
 
     return rank == 0;
 }
 
+/**
+ * Retourne la différence entre 2 temps de type timeval. On passe un temps initial et
+ * un temps final, et cela nous donne la quantité de temps pour passer du temps initial
+ * au final.
+ */
 double getTimeDifferenceMS(struct timeval startTime, struct timeval endTime) {
 
     double elapsedTime = (endTime.tv_sec - startTime.tv_sec) * 1000.0;
@@ -73,21 +110,35 @@ double getTimeDifferenceMS(struct timeval startTime, struct timeval endTime) {
     return elapsedTime;
 }
 
+/**
+ * Permet de mettre au carré une valeur
+ */
 int powSquare(double value) {
 
     return value * value;
 }
 
+/**
+ * Permet d'imprimer une valeur dans un format acceptable pour la présentation.
+ */
 void printWithFormat(float value) {
 
     printf("%-10.2f|", value);
 }
 
+/**
+ * Permet de présenter l'initialisation d'un type de problème. Donc, le paramètre peut être soit
+ * séquentiel ou parallèle.
+ */
 void printProblemInitialization(char* solvingType) {
 
     printf("\nProblem solving type : %s.\nStarting process...\n\n", solvingType);
 }
 
+/**
+ * Permet de créer un tableau en double dimension et d'initialiser ses valeurs en fonction
+ * du problème de transfert de chaleur en 2D d'une plaque chauffante.
+ */
 double** createArraySequential(struct TransformationProperties properties) {
 
     double** array;
@@ -107,6 +158,10 @@ double** createArraySequential(struct TransformationProperties properties) {
     return array;
 }
 
+/**
+ * Permet de copier toutes les valeurs d'une matrice vers une autre matrice,
+ * Utile pour faire abstraction des pointeurs et garder une copie d'une matrice.
+ */
 double** copyMatrix(struct TransformationProperties properties, double** matrix) {
 
     double** newMatrix;
@@ -126,6 +181,12 @@ double** copyMatrix(struct TransformationProperties properties, double** matrix)
     return newMatrix;
 }
 
+/**
+ * Permet de présenter les résultats suite à la résolution du problème de transfert
+ * de chaleur en 2D d'une plaque chauffante séquentiellement. Contrairement à la
+ * fonction utilisée pour la résolution parallèle, cette fonction a besoin d'une matrice
+ * et non d'un tableau.
+ */
 void printSequentialData(struct TransformationProperties properties, double** data, double elapsedTime) {
 
     printf("Time taken : %f ms.\n", elapsedTime);
@@ -146,6 +207,13 @@ void printSequentialData(struct TransformationProperties properties, double** da
     printf("\n\n");
 }
 
+/**
+ * Nécessaire pour faire le traitement du problème de transfert de chaleur en 2D d'une plaque chauffante
+ * séquentiellement. Donc, contrairement à la résolution parallèle, il s'agit surtout  d'utiliser plusieurs
+ * boucles imbriquées. Tout d'abord, on initialise les valeurs et le temps, puis on résout le problème
+ * naîvement en ne distribuant pas la charge en utilisant simplement des boucles. Puis, on présente
+ * les données.
+ */
 double processSequential(struct TransformationProperties properties) {
 
     printProblemInitialization("Sequential");
@@ -190,6 +258,10 @@ double processSequential(struct TransformationProperties properties) {
     return elapsedTime;
 }
 
+/**
+ * Permet de présente les variables d'exécutions entrées a l'utilisateur dans un
+ * format acceptable.
+ */
 void printInitialization(struct TransformationProperties properties) {
 
     printf("\nProperties : \n");
@@ -202,6 +274,10 @@ void printInitialization(struct TransformationProperties properties) {
     printf("----------------------------------------------------\n");
 }
 
+/**
+ * Permet de comparer les résultats de l'exécution parallele et séquentiel
+ * en calculant l'accélération.
+ */
 void compareProcesses(double timeSequential, double timeParallel) {
 
     double acceleration = timeSequential / timeParallel;
@@ -212,6 +288,11 @@ void compareProcesses(double timeSequential, double timeParallel) {
     printf("             = %f\n", acceleration);
 }
 
+/**
+ * Permet d'initiliser une cellule a partir d'une structure. Par défaut,
+ * le valeurs adjacentes sont égales a zéro jusqu'a la preuve que la cellule n'est
+ * pas située a moins de 2 épaisseurs en bordure du tableau.
+ */
 struct Cell buildCell(int posX, int posY, double value) {
 
     struct Cell cell;
@@ -227,6 +308,11 @@ struct Cell buildCell(int posX, int posY, double value) {
     return cell;
 }
 
+/**
+ * Permet de vérifier si, a partir d'un tableau a dimension unique, une cellule
+ * est logiquement situé sur la bordure du tableau. C'est utile par calculer rapidement
+ * une valeur puisque nous sachons qu'une donnée sur une bordure est toujours égale a zéro,
+ */
 bool isCellPadding(int i, int sizeY, int dataSize) {
 
     bool isPaddingHorizontal = i < sizeY || i > dataSize - sizeY;
