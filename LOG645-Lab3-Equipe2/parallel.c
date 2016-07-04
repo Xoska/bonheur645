@@ -321,6 +321,12 @@ bool isCellPadding(int i, int sizeY, int dataSize) {
     return isPaddingHorizontal || isPaddingVertical;
 }
 
+/**
+ * Permet de présenter les résultats suite à la résolution du problème de transfert
+ * de chaleur en 2D d'une plaque chauffante parallèlement. Contrairement à la
+ * fonction utilisée pour la résolution séquentielle, cette fonction a besoin d'un tableau
+ * à dimension unique de cellules et non une matrice.
+ */
 void printCells(struct Cell* cells, struct TransformationProperties properties, double elapsedTime) {
 
     printf("Time taken : %f ms.\n", elapsedTime);
@@ -347,6 +353,13 @@ void printCells(struct Cell* cells, struct TransformationProperties properties, 
     printf("\n\n");
 }
 
+/**
+ * Permet de peupler les valeurs adjacentes nécessaires à une cellule pour la résolution
+ * du problème de transfert de chaleur en 2D d'une plaque chauffante. Par défaut, la valeur
+ * adjacente est zéro, mais elle peut changée si la position de la cellule de base dans la matrice
+ * logique est située à plus de 2 épaisseurs. Pour maximiser la performance, on veut effectuer
+ * le moins de traitement possible, donc on calculera la valeur adjacente juste si nécessaire.
+ */
 struct Cell* addAdjacentValuesToCells(int innerSizeY, struct Cell* cells, int sizeCells) {
 
     int i;
@@ -377,6 +390,12 @@ struct Cell* addAdjacentValuesToCells(int innerSizeY, struct Cell* cells, int si
     return cells;
 }
 
+/**
+ * Permet d'initiliser le tableau de cellules à partir d'une matrice. Chaque cellules auront leur position
+ * et valeur initiale en fonction du problème à résoudre. Ainsi, on transforme une matrice à un tableau à
+ * une seule dimension pour faciliter la répartition des cellules à travers les processeurs. Par contre, une
+ * cellule conserve sa position logique dans une matrice.
+ */
 struct Cell* createCells(struct TransformationProperties properties) {
 
     struct Cell* cells = (struct Cell*) malloc(sizeof(struct Cell) * (properties.sizeX * properties.sizeY));
@@ -397,6 +416,11 @@ struct Cell* createCells(struct TransformationProperties properties) {
     return cells;
 }
 
+/**
+ * Permet de résoudre le problème de transfert de chaleur en 2D d'une plaque chauffante pour la
+ * résolution parallèle. Chaque processeurs auront un ensemble de cellules à traiter dépendamment
+ * de leur nombre dans le groupe et la taille des données.
+ */
 struct Cell* computeProblem(struct Cell* cells, int subsetSize, int iteration, struct TransformationProperties properties) {
 
     int i;
@@ -415,6 +439,9 @@ struct Cell* computeProblem(struct Cell* cells, int subsetSize, int iteration, s
     return cells;
 }
 
+/**
+ * Permet de créer la nouvelle structure MPI pour le passage de variables ayant la structure Cell
+ */
 void createCellStructure() {
 
     const int countStructureCell = CELL_STRUCTURE_SIZE;
@@ -435,6 +462,9 @@ void createCellStructure() {
     MPI_Type_commit(&mpiCellType);
 }
 
+/**
+ * Permet de récuperer le rang d'un processeur dans son communicateur.
+ */
 int getCommRank(MPI_Comm comm) {
 
     int rank;
@@ -443,6 +473,9 @@ int getCommRank(MPI_Comm comm) {
     return rank;
 }
 
+/**
+ * Permet de récupérer la taille de son groupe de processeurs selon son communicateur
+ */
 int getCommSize(MPI_Comm comm) {
 
     int size;
@@ -451,6 +484,12 @@ int getCommSize(MPI_Comm comm) {
     return size;
 }
 
+/**
+ * Permet d'initialiser la topologie globale du système. Ainsi, on récupère communicateur global, sont rang,
+ * sa taille et la taille de ses données associées à traiter éventuellement. Pour calculer la taille des données,
+ * on compte le nombre de cellule dans la matrice initiale après avoir enlever une couche d'épaisseur. On enlève
+ * une couche d'épaisseur, car il est inutile de calculer des valeurs qui seront toujours zéro.
+ */
 struct Topology initWorldTopology(struct TransformationProperties properties) {
 
     struct Topology worldTopology;
@@ -463,6 +502,11 @@ struct Topology initWorldTopology(struct TransformationProperties properties) {
     return worldTopology;
 }
 
+/**
+ * Permet d'initialiser un groupe de processeur dont son nombre sera maximiser en fonction du nombre
+ * de cellules à traiter. Il sera toujours possible de diviser entièrement le nombre de données à
+ * traiter de ce groupe par son nombre de processeur alloué.
+ */
 struct Topology initMainTopology(struct Topology worldTopology, int nbLeftOvers) {
 
     struct Topology mainTopology;
@@ -478,6 +522,14 @@ struct Topology initMainTopology(struct Topology worldTopology, int nbLeftOvers)
     return mainTopology;
 }
 
+/**
+ * Permet d'initialiser un groupe de processeur correspondant au restants de division du nombre de
+ * cellules total à traiter par le nombre de processeur. Ainsi, On se crer 2 groupes distincts
+ * pour la gestion des restes. Son nombre sera généralement beaucoup plus petit que l'autre
+ * groupe principal. Par exemple, pour 24 cellules et 5 processeurs, le groupe principale
+ * aura 20 cellules réparties du 5 processeurs et ce groupe aura 4 cellules réparties sur
+ * 4 processeurs.
+ */
 struct Topology initLeftOverTopology(struct Topology worldTopology, int nbLeftOvers) {
 
     struct Topology leftOverTopology;
@@ -493,6 +545,11 @@ struct Topology initLeftOverTopology(struct Topology worldTopology, int nbLeftOv
     return leftOverTopology;
 }
 
+/**
+ * Permet d'initialiser toutes les topologies, de calculer le nombre de restant et d'initliser
+ * les données à traiter. Il s'agit de l'initialisation de tous les paramètres nécessaires
+ * pour l'utilisation de MPI au cours de l'exécution du système.
+ */
 struct MPIParams initMPI(int argc, char *argv[], struct TransformationProperties properties) {
 
     struct MPIParams mpiParams;
@@ -521,12 +578,21 @@ struct MPIParams initMPI(int argc, char *argv[], struct TransformationProperties
     return mpiParams;
 }
 
+/**
+ * Permet d'initialiser un tableau à une dimension à une taille variable.
+ */
 struct Cell* initCellsOfSize(int size) {
 
     return (struct Cell*) malloc(sizeof(struct Cell) * size);
 }
 
-
+/**
+ * Permet d'extraire des cellules d'un tableau à une dimension en fonction d'une position de
+ * départ et une position de fin. Par exemple, si on a 24 cellules, cette fonction sera utilisée
+ * pour séparer le tableau principal des données pour le groupe principal et le groupe des restants,
+ * donc elle sera appelée d'abord pour séparer le tableau de 0 à 20, puis de 21 à 24 pour les restants.
+ *
+ */
 struct Cell* extractCells(struct Cell* cells, int posStart, int posEnd) {
 
     int length = posEnd - posStart, i, pos = 0;
@@ -540,6 +606,14 @@ struct Cell* extractCells(struct Cell* cells, int posStart, int posEnd) {
     return newCells;
 }
 
+/**
+ * Il s'agit du coeur du traitement parallèle. En fonction du groupe en cours, le tableau de cellules
+ * à traiter sera répartie également au travers de son groupe pour que chacun de ses processeurs résout
+ * le problème, puis les cellules seront récupérées par le processeur racine. En fonction du tableau,
+ * la charge sera répartie également au travers des processeurs de son groupe pour traiter les données,
+ * puis le processeur racine du groupe récupère les données. Donc, cette fonction sera utilisée pour le
+ * groupe principal et le groupe des restants.
+ */
 struct Cell* scatterByTopologyCore(struct TransformationProperties properties, struct Topology topology,
                                    struct Cell* cells, int subsetSize, int iteration) {
 
@@ -561,6 +635,11 @@ struct Cell* scatterByTopologyCore(struct TransformationProperties properties, s
     return processedCells;
 }
 
+/**
+ * Permet d'appeler la fonction de traitement parallèle et de calculer le nombre de cellules
+ * attribué à chacun des processeur du groupe principal. Comme on peut le voir, la division
+ * sera toujours entière.
+ */
 struct Cell* scatterMainCells(struct Topology main, struct Cell* mainCells,
                               struct TransformationProperties properties, int i) {
 
@@ -569,6 +648,11 @@ struct Cell* scatterMainCells(struct Topology main, struct Cell* mainCells,
     return scatterByTopologyCore(properties, main, mainCells, subsetSizeMain, i);
 }
 
+/**
+ * Permet d'appeler la fonction de traitement parallèle et de calculer le nombre de cellules
+ * attribué à chacun des processeur du groupe des restants. Comme on peut le voir, les processeurs
+ * de ce groupe n'auront jamais plus que 1 élément.
+ */
 struct Cell* scatterLeftOverCells(struct Topology leftOver, struct Cell* leftOverCells,
                                   struct TransformationProperties properties, int i) {
 
@@ -577,6 +661,12 @@ struct Cell* scatterLeftOverCells(struct Topology leftOver, struct Cell* leftOve
     return scatterByTopologyCore(properties, leftOver, leftOverCells, subsetSizeLeftOver, i);
 }
 
+/**
+ * Permet de récupérer les cellules traitées par le groupe principal et le groupe des restants
+ * pour les ramener dans un seul tableau. Donc, on passe le tableau principal et le tableau
+ * des restants pour sortir avec un seul tableau de leurs cellules. Cela est nécessaire
+ * pour calculer éventuellement les cellules adjacente des données.
+ */
 struct Cell* concatenateCells(struct Cell* mainCells, int mainCellsSize,
                               struct Cell* leftoverCells, int leftoverCellsSize) {
 
@@ -599,6 +689,10 @@ struct Cell* concatenateCells(struct Cell* mainCells, int mainCellsSize,
     return data;
 }
 
+/**
+ * Permet de terminer le traitement parallèle. On calcule le temps final, on présente les données puis on
+ * calcule le temps séquentiel, Ensuite, une comparaison des temps est présentée.
+ */
 void endProcess(struct Cell* data, struct TransformationProperties properties, struct timeval startTime) {
 
     struct timeval endTime;
@@ -613,6 +707,14 @@ void endProcess(struct Cell* data, struct TransformationProperties properties, s
     compareProcesses(timeSequential, timeParallel);
 }
 
+/**
+ * Il s'agit du coeur pour le traitement parallèle du programme. Cette fonction s'occupera d'abord
+ * d'initialiser les différentes variables pour éviter de les re-calculer pendant le cours de
+ * l'exécution parallèle, Ensuite, pour chaque pas de temps, le processeur racine divisera en 2
+ * le tableau des données, soit une partie pour les données principales et une partie pour les restes.
+ * Lorsque les 2 parties ont terminé leur traitement, le processseur racine s'occupe de fusionner
+ * les tableaux et de reconstruire la valeur adjacente de chaque cellule.
+ */
 void processProblemCore(struct MPIParams mpiParams, struct TransformationProperties properties, struct timeval startTime) {
 
     struct Cell* data = NULL;
@@ -671,30 +773,29 @@ void processProblemCore(struct MPIParams mpiParams, struct TransformationPropert
     }
 }
 
-void processParallel(struct TransformationProperties properties, int argc, char *argv[]) {
-
-    struct timeval startTime;
-    struct MPIParams mpiParams = initMPI(argc, argv, properties);
-
-    if (isRootProcess(mpiParams.world.rank)) {
-
-        printInitialization(properties);
-        printProblemInitialization("Parallel MPI");
-        gettimeofday(&startTime, NULL);
-    }
-
-    processProblemCore(mpiParams, properties, startTime);
-
-    MPI_Finalize();
-}
-
+/**
+ * Point d'entré du programme, On initialise les variables d'environnement du système
+ * et on initialise les variables nécessaires pour l'exécution parallèle.
+ */
 int main(int argc, char *argv[]) {
 
     if (argc == 6) {
 
         struct TransformationProperties properties = buildProperties(argv);
 
-        processParallel(properties, argc, argv);
+        struct timeval startTime;
+        struct MPIParams mpiParams = initMPI(argc, argv, properties);
+
+        if (isRootProcess(mpiParams.world.rank)) {
+
+            printInitialization(properties);
+            printProblemInitialization("Parallel MPI");
+            gettimeofday(&startTime, NULL);
+        }
+
+        processProblemCore(mpiParams, properties, startTime);
+
+        MPI_Finalize();
     }
     else {
 
