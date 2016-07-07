@@ -113,7 +113,7 @@ double getTimeDifferenceMS(struct timeval startTime, struct timeval endTime) {
 /**
  * Permet de mettre au carré une valeur
  */
-int powSquare(double value) {
+double powSquare(double value) {
 
     return value * value;
 }
